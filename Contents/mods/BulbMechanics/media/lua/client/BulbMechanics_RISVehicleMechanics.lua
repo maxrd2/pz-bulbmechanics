@@ -1,4 +1,5 @@
 require "BulbMechanics"
+require "TimedActions/BulbMechanics_FutureAction"
 
 local original_ISVehicleMechanics_doPartContextMenu = ISVehicleMechanics.doPartContextMenu
 
@@ -75,6 +76,8 @@ function BulbMechanics:onTrainMechanics(playerObj, vehicle, part)
 
 		local time = tonumber(part:getTable("install").time) or 50
 
+		local playerInventory = playerObj:getInventory()
+
 		local installedItem = part:getInventoryItem()
 		if installedItem then
 			-- remove existing item
@@ -83,48 +86,85 @@ function BulbMechanics:onTrainMechanics(playerObj, vehicle, part)
 			first = false;
 		end
 
-		local hasXPItem = false
-
 		for i, item in ipairs(typeToItem["Base.LightBulb"]) do
 			local itemID = item:getID()
 			local giveXP = playerObj:getMechanicsItem(itemID .. vehicleID .. "1") == nil
 			BulbMechanics.debug("BulbMechanics:onTrainMechanics Base.LightBulb#" .. i .. " - id:" .. itemID .. " giveXP:" .. (giveXP and "true" or "false"))
 
 			if giveXP then
+				-- transfer item to player's inventory
+				local itemContainer = item:getContainer()
+				local transferItem = itemContainer and itemContainer ~= playerInventory
+				if transferItem then
+					ISTimedActionQueue.add(BulbMechanics_FutureAction:new(function(d)
+						BulbMechanics.debug("BulbMechanics:onTrainMechanics transfer item " .. d.item:getID() .. " to player inventory")
+						return ISInventoryTransferAction:new(d.player, d.item, d.invSrc, d.invDst)
+					end, {
+						player = playerObj,
+						item = item,
+						invSrc = itemContainer,
+						invDst = playerInventory
+					}))
+				end
+
 				-- install inventory item
 				if first then
 					ISVehiclePartMenu.onInstallPart(playerObj, part, item)
 				else
-					ISTimedActionQueue.add(ISInstallVehiclePart:new(playerObj, part, item, time))
+					ISTimedActionQueue.add(BulbMechanics_FutureAction:new(function(d)
+						BulbMechanics.debug("BulbMechanics:onTrainMechanics install item " .. d.item:getID())
+						return ISInstallVehiclePart:new(d.player, d.part, d.item, d.time)
+					end, {
+						player = playerObj,
+						item = item,
+						part = part,
+						time = time
+					}))
 				end
-				-- remove inventory item
-				ISTimedActionQueue.add(ISUninstallVehiclePart:new(playerObj, part, time))
+
+				-- uninstall inventory item
+				ISTimedActionQueue.add(BulbMechanics_FutureAction:new(function(d)
+					BulbMechanics.debug("BulbMechanics:onTrainMechanics uninstall item " .. d.item:getID())
+					d.part:setInventoryItem(d.item) -- seems there's a delay with client updates or something
+					return ISUninstallVehiclePart:new(d.player, d.part, d.time)
+				end, {
+					player = playerObj,
+					item = item,
+					part = part,
+					time = time
+				}))
+
+				-- transfer item back to original inventory
+				if transferItem then
+					ISTimedActionQueue.add(BulbMechanics_FutureAction:new(function(d)
+						BulbMechanics.debug("BulbMechanics:onTrainMechanics transfer item " .. d.item:getID() .. " back to original inventory")
+						-- again... seems there's a delay with client updates or something
+						d.invDst:removeItemWithID(d.item:getID())
+						d.invSrc:addItem(d.item)
+						d.item:setContainer(d.invSrc)
+						return ISInventoryTransferAction:new(d.player, d.item, d.invSrc, d.invDst)
+					end, {
+						player = playerObj,
+						item = item,
+						invSrc = playerInventory,
+						invDst = itemContainer
+					}))
+				end
 			end
 		end
 
 		if installedItem then
 			-- install previously installed item
-			BulbMechanics.debug("BulbMechanics:onTrainMechanics reinstall previously installed item id:" .. installedItem:getID())
-			local qi = ISInstallVehiclePart:new(playerObj, part, installedItem, time);
-			-- override isValid just for this instance, as installedItem is not in inventory yet
-			qi.origItemId = installedItem:getID()
-			qi.isValid = function(obj)
-				local partItem = obj.part:getInventoryItem();
-				if partItem and partItem:getID() == qi.origItemId then
-					BulbMechanics.debug("BulbMechanics:onTrainMechanics overridden ISInstallVehiclePart:isValid() original item still installed")
-					return true
-				end
-				local item = obj.character:getInventory():getItemById(obj.item:getID());
-				if item then
-					obj.item = item
-					BulbMechanics.debug("BulbMechanics:onTrainMechanics overridden ISInstallVehiclePart:isValid() original item is in inventory")
-					obj.isValid = ISInstallVehiclePart.isValid -- restore original isValid
-					return true
-				end
-				BulbMechanics.debug("BulbMechanics:onTrainMechanics overridden ISInstallVehiclePart:isValid() uh-oh where is the original item?")
-				return false
-			end
-			ISTimedActionQueue.add(qi)
+			ISTimedActionQueue.add(BulbMechanics_FutureAction:new(function(d)
+				BulbMechanics.debug("BulbMechanics:onTrainMechanics reinstall previously installed item id:" .. d.item:getID())
+				local item = d.player:getInventory():getItemById(d.item:getID())
+				return ISInstallVehiclePart:new(d.player, d.part, item, d.time)
+			end, {
+				player = playerObj,
+				part = part,
+				item = installedItem,
+				time = time
+			}))
 		end
 	end
 

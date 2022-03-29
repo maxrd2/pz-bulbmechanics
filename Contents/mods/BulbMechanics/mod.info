@@ -1,0 +1,5 @@
+name=BulbMechanics
+poster=BulbMechanicsPoster.png
+id=BulbMechanics
+description=Mod that queues install/uninstall mechanics actions for every lighbulb in reachable inventory that will give XP.
+url=

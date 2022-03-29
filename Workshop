@@ -1,0 +1,8 @@
+
+
+version=1
+title=BulbMechanics
+description=Train mechanics helper
+description=Mod that queues install/uninstall mechanics actions for every lighbulb in reachable inventory that will give XP.
+tags=
+visibility=public
